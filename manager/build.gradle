@@ -12,7 +12,7 @@ plugins {
 }
 
 android {
-    namespace 'moe.shizuku.manager'
+    namespace = 'moe.shizuku.manager'
     defaultConfig {
         applicationId "moe.shizuku.privileged.api"
         versionCode rootProject.ext.versionCode
@@ -24,23 +24,23 @@ android {
         }
     }
     buildFeatures {
-        buildConfig true
-        compose true
-        viewBinding true
-        prefab true
+        buildConfig = true
+        compose = true
+        viewBinding = true
+        prefab = true
     }
     signingConfigs {
         sign
     }
     buildTypes {
         debug {
-            signingConfig signingConfigs.sign
+            signingConfig = signingConfigs.sign
         }
         release {
-            signingConfig signingConfigs.sign
+            signingConfig = signingConfigs.sign
             minifyEnabled true
-            shrinkResources true
-            vcsInfo.include false
+            shrinkResources = true
+            vcsInfo.include = false
             proguardFiles 'proguard-rules.pro'
         }
     }
@@ -55,17 +55,17 @@ android {
     }
     packagingOptions {
         jniLibs {
-            useLegacyPackaging true
+            useLegacyPackaging = true
         }
         resources {
             excludes += ['**']
         }
     }
     dependenciesInfo {
-        includeInApk false
+        includeInApk = false
     }
     lint {
-        checkReleaseBuilds false
+        checkReleaseBuilds = false
     }
 }
 
