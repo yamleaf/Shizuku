@@ -82,6 +82,23 @@
     <string name="home_learn_more_title">Learn Shizuku</string>
     <string name="home_learn_more_description">Learn how to develop with Shizuku</string>
 
+    <!-- Home - Floating navigation tabs -->
+    <string name="home_tab_launch">Launch</string>
+    <string name="home_tab_running">Running</string>
+
+    <!-- Home - Running details -->
+    <string name="running_details_title">Running details</string>
+    <string name="running_details_launch_mode">Launch mode</string>
+    <string name="running_details_uid">UID</string>
+    <string name="running_details_api_version">API version</string>
+    <string name="running_details_patch_version">Patch version</string>
+    <string name="running_details_selinux_context">SELinux context</string>
+    <string name="running_details_permission">Permission</string>
+    <string name="running_details_permission_granted">Granted</string>
+    <string name="running_details_permission_not_granted">Not granted</string>
+    <string name="running_details_authorized_count">Authorized apps</string>
+    <string name="running_status_not_running_hint">Shizuku is not running. Go to the Launch tab to start it.</string>
+
     <!-- Home - Adb permissions limited -->
     <string name="home_adb_is_limited_title">You need to take an extra step</string>
     <string name="home_adb_is_limited_description">Your device manufacturer has restricted adb permissions and apps using Shizuku will not work properly.\n\nUsually, this limitation can be lifted by adjusting some options in \"Developer options\". Please read the help for details on how to do this.\n\nYou may need to restart Shizuku for the operation to take effect.</string>

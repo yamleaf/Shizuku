@@ -24,7 +24,6 @@ import moe.shizuku.manager.adb.AdbWirelessHelper
 import moe.shizuku.manager.app.AppActivity
 import moe.shizuku.manager.management.AppsManagementActivity
 import moe.shizuku.manager.management.appsViewModel
-import moe.shizuku.manager.settings.SettingsActivity
 import moe.shizuku.manager.shell.ShellTutorialActivity
 import moe.shizuku.manager.starter.Starter
 import moe.shizuku.manager.starter.StarterActivity
@@ -74,9 +73,7 @@ abstract class HomeActivity : AppActivity() {
                 status = serviceStatus?.data,
                 grantedCount = grantedCount?.data,
                 onNavigateBack = { finish() },
-                onOpenSettings = {
-                    startActivity(Intent(this, SettingsActivity::class.java))
-                },
+                onRecreateRequested = { recreate() },
                 onStopService = { stopService() },
                 onManageApps = {
                     startActivity(Intent(this, AppsManagementActivity::class.java))

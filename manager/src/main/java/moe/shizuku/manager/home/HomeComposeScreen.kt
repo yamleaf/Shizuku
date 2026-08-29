@@ -1,7 +1,9 @@
 package moe.shizuku.manager.home
 
+import android.content.Context
 import android.content.Intent
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,22 +13,27 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Link
-import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.PlayCircleOutline
+import androidx.compose.material.icons.outlined.RocketLaunch
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.outlined.Wifi
@@ -34,35 +41,39 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import moe.shizuku.manager.Helps
 import moe.shizuku.manager.R
+import moe.shizuku.manager.ShizukuSettings
 import moe.shizuku.manager.model.ServiceStatus
+import moe.shizuku.manager.settings.SettingsTabContent
 import moe.shizuku.manager.starter.Starter
 import moe.shizuku.manager.ui.theme.ShizukuComposeTheme
 import moe.shizuku.manager.utils.EnvironmentUtils
@@ -70,12 +81,16 @@ import moe.shizuku.manager.utils.UserHandleCompat
 import rikka.html.text.HtmlCompat
 import androidx.core.net.toUri
 
+private const val TAB_LAUNCH = 0
+private const val TAB_RUNNING = 1
+private const val TAB_SETTINGS = 2
+
 @Composable
 fun HomeComposeScreen(
     status: ServiceStatus?,
     grantedCount: Int?,
     onNavigateBack: () -> Unit,
-    onOpenSettings: () -> Unit,
+    onRecreateRequested: () -> Unit,
     onStopService: () -> Unit,
     onManageApps: () -> Unit,
     onOpenTerminal: () -> Unit,
@@ -94,7 +109,7 @@ fun HomeComposeScreen(
             status = status,
             grantedCount = grantedCount,
             onNavigateBack = onNavigateBack,
-            onOpenSettings = onOpenSettings,
+            onRecreateRequested = onRecreateRequested,
             onStopService = onStopService,
             onManageApps = onManageApps,
             onOpenTerminal = onOpenTerminal,
@@ -117,7 +132,7 @@ private fun HomeScreenContent(
     status: ServiceStatus?,
     grantedCount: Int?,
     onNavigateBack: () -> Unit,
-    onOpenSettings: () -> Unit,
+    onRecreateRequested: () -> Unit,
     onStopService: () -> Unit,
     onManageApps: () -> Unit,
     onOpenTerminal: () -> Unit,
@@ -132,85 +147,133 @@ private fun HomeScreenContent(
     onOpenLearnMore: () -> Unit
 ) {
     val context = LocalContext.current
-    var menuExpanded by remember { mutableStateOf(false) }
+    var selectedTab by rememberSaveable { mutableIntStateOf(TAB_RUNNING) }
     var dialog by remember { mutableStateOf<HomeDialog?>(null) }
+    val resolvedStatus = status ?: ServiceStatus()
+    val running = resolvedStatus.isRunning
     val versionName = remember {
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
             .getOrNull()
             .orEmpty()
     }
-    val items = buildHomeItems(
+
+    val launchItems = buildList {
+        addAll(
+            buildLaunchItems(
+                context = context,
+                status = resolvedStatus,
+                onStartRoot = onStartRoot,
+                onRestartRoot = onRestartRoot,
+                onShowAdbCommand = { dialog = HomeDialog.AdbCommand },
+                onOpenWirelessGuide = onOpenWirelessGuide,
+                onPairWireless = onPairWireless,
+                onStartWirelessAdb = onStartWirelessAdb,
+                onOpenLearnMore = onOpenLearnMore
+            )
+        )
+        add(
+            HomeUiItem.Action(
+                title = context.getString(R.string.action_about),
+                summary = versionName,
+                icon = Icons.Outlined.Info,
+                enabled = true,
+                onClick = { dialog = HomeDialog.About }
+            )
+        )
+        if (running) {
+            add(
+                HomeUiItem.Action(
+                    title = context.getString(R.string.action_stop),
+                    summary = context.getString(R.string.dialog_stop_message),
+                    icon = Icons.Outlined.Stop,
+                    tonal = false,
+                    onClick = { dialog = HomeDialog.Stop }
+                )
+            )
+        }
+    }
+
+    val runningActions = buildRunningActions(
         context = context,
-        status = status,
+        status = resolvedStatus,
         grantedCount = grantedCount,
         onManageApps = onManageApps,
         onOpenTerminal = onOpenTerminal,
-        onStartRoot = onStartRoot,
-        onRestartRoot = onRestartRoot,
-        onShowAdbCommand = { dialog = HomeDialog.AdbCommand },
-        onOpenWirelessGuide = onOpenWirelessGuide,
-        onPairWireless = onPairWireless,
-        onStartWirelessAdb = onStartWirelessAdb,
-        onOpenAdbPermissionHelp = onOpenAdbPermissionHelp,
-        onOpenLearnMore = onOpenLearnMore
+        onOpenAdbPermissionHelp = onOpenAdbPermissionHelp
     )
 
-    BackHandler(onBack = onNavigateBack)
+    val statusItem = HomeUiItem.Status(
+        title = if (running) {
+            context.getString(R.string.home_status_service_is_running, context.getString(R.string.app_name))
+        } else {
+            context.getString(R.string.home_status_service_not_running, context.getString(R.string.app_name))
+        },
+        summary = if (running) {
+            context.getString(
+                R.string.home_status_service_version,
+                if (resolvedStatus.uid == 0) "root" else "adb",
+                resolvedStatus.versionName
+            )
+        } else null,
+        running = running
+    )
+
+    BackHandler {
+        if (selectedTab != TAB_RUNNING) {
+            selectedTab = TAB_RUNNING
+        } else {
+            onNavigateBack()
+        }
+    }
 
     Scaffold(
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
         contentColor = MaterialTheme.colorScheme.onBackground,
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.app_name)) },
-                actions = {
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings_title))
-                    }
-                    IconButton(onClick = { menuExpanded = true }) {
-                        Icon(Icons.Outlined.MoreVert, contentDescription = stringResource(R.string.more_options))
-                    }
-                    DropdownMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.action_about)) },
-                            onClick = {
-                                menuExpanded = false
-                                dialog = HomeDialog.About
-                            }
-                        )
-                        if (status?.isRunning == true) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.action_stop)) },
-                                onClick = {
-                                    menuExpanded = false
-                                    dialog = HomeDialog.Stop
-                                }
-                            )
-                        }
-                    }
-                }
+            TopAppBar(title = { Text(stringResource(R.string.app_name)) })
+        },
+        bottomBar = {
+            FloatingNavigationBar(
+                selectedTab = selectedTab,
+                onSelect = { selectedTab = it }
             )
         }
     ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 20.dp,
-                top = innerPadding.calculateTopPadding() + 12.dp,
-                end = 20.dp,
-                bottom = innerPadding.calculateBottomPadding() + 20.dp
-            ),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            items(items) { item ->
-                when (item) {
-                    is HomeUiItem.Status -> StatusCard(item)
-                    is HomeUiItem.Action -> ActionCard(item)
-                }
+        val contentPadding = PaddingValues(
+            start = 20.dp,
+            top = innerPadding.calculateTopPadding() + 12.dp,
+            end = 20.dp,
+            bottom = innerPadding.calculateBottomPadding() + 20.dp
+        )
+        when (selectedTab) {
+            TAB_LAUNCH -> LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = contentPadding,
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                items(launchItems) { item -> ActionCard(item) }
             }
+
+            TAB_RUNNING -> LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = contentPadding,
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                item { StatusCard(statusItem) }
+                item {
+                    if (running) {
+                        RunningDetailsCard(status = resolvedStatus, grantedCount = grantedCount)
+                    } else {
+                        NotRunningHint()
+                    }
+                }
+                items(runningActions) { item -> ActionCard(item) }
+            }
+
+            TAB_SETTINGS -> SettingsTabContent(
+                onRecreateRequested = onRecreateRequested,
+                contentPadding = contentPadding
+            )
         }
     }
 
@@ -303,6 +366,138 @@ private fun HomeScreenContent(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun FloatingNavigationBar(
+    selectedTab: Int,
+    onSelect: (Int) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 40.dp, vertical = 12.dp)
+    ) {
+        NavigationBar(
+            modifier = Modifier
+                .fillMaxWidth()
+                .shadow(elevation = 8.dp, shape = RoundedCornerShape(28.dp), clip = true),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f),
+            tonalElevation = 0.dp,
+            windowInsets = WindowInsets(0, 0, 0, 0)
+        ) {
+            NavigationBarItem(
+                selected = selectedTab == TAB_LAUNCH,
+                onClick = { onSelect(TAB_LAUNCH) },
+                icon = { Icon(Icons.Outlined.RocketLaunch, contentDescription = null) },
+                label = { Text(stringResource(R.string.home_tab_launch)) }
+            )
+            NavigationBarItem(
+                selected = selectedTab == TAB_RUNNING,
+                onClick = { onSelect(TAB_RUNNING) },
+                icon = { Icon(Icons.Outlined.PlayCircleOutline, contentDescription = null) },
+                label = { Text(stringResource(R.string.home_tab_running)) }
+            )
+            NavigationBarItem(
+                selected = selectedTab == TAB_SETTINGS,
+                onClick = { onSelect(TAB_SETTINGS) },
+                icon = { Icon(Icons.Outlined.Settings, contentDescription = null) },
+                label = { Text(stringResource(R.string.settings_title)) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun RunningDetailsCard(status: ServiceStatus, grantedCount: Int?) {
+    val context = LocalContext.current
+    val rows = remember(status) {
+        buildList {
+            add(context.getString(R.string.running_details_launch_mode) to launchModeLabel(context, status))
+            add(context.getString(R.string.running_details_uid) to status.uid.toString())
+            if (status.apiVersion >= 0) {
+                add(context.getString(R.string.running_details_api_version) to status.apiVersion.toString())
+            }
+            if (status.patchVersion >= 0) {
+                add(context.getString(R.string.running_details_patch_version) to status.patchVersion.toString())
+            }
+            status.seContext?.let {
+                add(context.getString(R.string.running_details_selinux_context) to it)
+            }
+            add(
+                context.getString(R.string.running_details_permission) to
+                    context.getString(
+                        if (status.permission) R.string.running_details_permission_granted
+                        else R.string.running_details_permission_not_granted
+                    )
+            )
+            grantedCount?.let {
+                add(context.getString(R.string.running_details_authorized_count) to it.toString())
+            }
+        }
+    }
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
+            contentColor = MaterialTheme.colorScheme.onSurface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = MaterialTheme.shapes.extraLarge
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp)
+        ) {
+            Text(
+                text = context.getString(R.string.running_details_title),
+                style = MaterialTheme.typography.titleMedium
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            rows.forEach { (label, value) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = label,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    Text(
+                        text = value,
+                        fontWeight = FontWeight.Medium,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NotRunningHint() {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.7f),
+            contentColor = MaterialTheme.colorScheme.onSurface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = MaterialTheme.shapes.extraLarge
+    ) {
+        Text(
+            text = stringResource(R.string.running_status_not_running_hint),
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+        )
+    }
+}
+
+@Composable
 private fun LinkRow(label: String, url: String) {
     val context = LocalContext.current
     Text(
@@ -326,85 +521,34 @@ private enum class HomeDialog {
     AdbCommand
 }
 
-private fun buildHomeItems(
-    context: android.content.Context,
-    status: ServiceStatus?,
-    grantedCount: Int?,
-    onManageApps: () -> Unit,
-    onOpenTerminal: () -> Unit,
+private fun launchModeLabel(context: Context, status: ServiceStatus): String {
+    val default = context.getString(
+        if (status.uid == 0) R.string.service_user_root else R.string.service_user_adb
+    )
+    return when (ShizukuSettings.getLastLaunchMode()) {
+        ShizukuSettings.LaunchMethod.ROOT -> context.getString(R.string.service_user_root)
+        ShizukuSettings.LaunchMethod.ADB -> context.getString(R.string.service_user_adb)
+        else -> default
+    }
+}
+
+private fun buildLaunchItems(
+    context: Context,
+    status: ServiceStatus,
     onStartRoot: () -> Unit,
     onRestartRoot: () -> Unit,
     onShowAdbCommand: () -> Unit,
     onOpenWirelessGuide: () -> Unit,
     onPairWireless: () -> Unit,
     onStartWirelessAdb: () -> Unit,
-    onOpenAdbPermissionHelp: () -> Unit,
     onOpenLearnMore: () -> Unit
 ): List<HomeUiItem> {
-    val resolvedStatus = status ?: ServiceStatus()
-    val running = resolvedStatus.isRunning
+    val running = status.isRunning
     val items = mutableListOf<HomeUiItem>()
-
-    items += HomeUiItem.Status(
-        title = if (running) {
-            context.getString(R.string.home_status_service_is_running, context.getString(R.string.app_name))
-        } else {
-            context.getString(R.string.home_status_service_not_running, context.getString(R.string.app_name))
-        },
-        summary = if (running) {
-            context.getString(
-                R.string.home_status_service_version,
-                if (resolvedStatus.uid == 0) "root" else "adb",
-                resolvedStatus.versionName
-            )
-        } else null,
-        running = running
-    )
-
-    if (resolvedStatus.permission) {
-        items += HomeUiItem.Action(
-            title = context.resources.getQuantityString(
-                R.plurals.home_app_management_authorized_apps_count,
-                grantedCount ?: 0,
-                grantedCount ?: 0
-            ),
-            summary = if (running) {
-                context.getString(R.string.home_app_management_view_authorized_apps)
-            } else {
-                context.getString(R.string.home_status_service_not_running, context.getString(R.string.app_name))
-            },
-            icon = Icons.Outlined.Security,
-            enabled = running,
-            onClick = onManageApps
-        )
-        items += HomeUiItem.Action(
-            title = context.getString(R.string.home_terminal_title),
-            summary = if (running) {
-                context.getString(R.string.home_terminal_description)
-            } else {
-                context.getString(R.string.home_status_service_not_running, context.getString(R.string.app_name))
-            },
-            icon = Icons.Outlined.Terminal,
-            enabled = running,
-            onClick = onOpenTerminal
-        )
-    }
-
-    if (running && !resolvedStatus.permission) {
-        items += HomeUiItem.Action(
-            title = context.getString(R.string.home_adb_is_limited_title),
-            summary = context.getString(R.string.home_adb_is_limited_description),
-            icon = Icons.Outlined.Warning,
-            enabled = true,
-            tonal = false,
-            primaryActionLabel = context.getString(R.string.home_adb_button_view_help),
-            onPrimaryAction = onOpenAdbPermissionHelp
-        )
-    }
 
     if (UserHandleCompat.myUserId() == 0) {
         val root = EnvironmentUtils.isRooted()
-        val rootRestart = running && resolvedStatus.uid == 0
+        val rootRestart = running && status.uid == 0
         if (root) {
             items += rootItem(context, running, rootRestart, onStartRoot, onRestartRoot)
         }
@@ -452,8 +596,62 @@ private fun buildHomeItems(
     return items
 }
 
+private fun buildRunningActions(
+    context: Context,
+    status: ServiceStatus,
+    grantedCount: Int?,
+    onManageApps: () -> Unit,
+    onOpenTerminal: () -> Unit,
+    onOpenAdbPermissionHelp: () -> Unit
+): List<HomeUiItem> {
+    val running = status.isRunning
+    val items = mutableListOf<HomeUiItem>()
+
+    if (status.permission) {
+        items += HomeUiItem.Action(
+            title = context.getQuantityString(
+                R.plurals.home_app_management_authorized_apps_count,
+                grantedCount ?: 0,
+                grantedCount ?: 0
+            ),
+            summary = if (running) {
+                context.getString(R.string.home_app_management_view_authorized_apps)
+            } else {
+                context.getString(R.string.home_status_service_not_running, context.getString(R.string.app_name))
+            },
+            icon = Icons.Outlined.Security,
+            enabled = running,
+            onClick = onManageApps
+        )
+        items += HomeUiItem.Action(
+            title = context.getString(R.string.home_terminal_title),
+            summary = if (running) {
+                context.getString(R.string.home_terminal_description)
+            } else {
+                context.getString(R.string.home_status_service_not_running, context.getString(R.string.app_name))
+            },
+            icon = Icons.Outlined.Terminal,
+            enabled = running,
+            onClick = onOpenTerminal
+        )
+    }
+
+    if (running && !status.permission) {
+        items += HomeUiItem.Action(
+            title = context.getString(R.string.home_adb_is_limited_title),
+            summary = context.getString(R.string.home_adb_is_limited_description),
+            icon = Icons.Outlined.Warning,
+            enabled = true,
+            tonal = false,
+            primaryActionLabel = context.getString(R.string.home_adb_button_view_help),
+            onPrimaryAction = onOpenAdbPermissionHelp
+        )
+    }
+    return items
+}
+
 private fun rootItem(
-    context: android.content.Context,
+    context: Context,
     running: Boolean,
     rootRestart: Boolean,
     onStartRoot: () -> Unit,

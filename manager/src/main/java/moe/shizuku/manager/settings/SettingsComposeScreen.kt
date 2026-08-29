@@ -106,6 +106,45 @@ private fun SettingsScreenContent(
     onRecreateRequested: () -> Unit
 ) {
     val context = LocalContext.current
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(text = context.getString(R.string.settings_title)) },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateUp) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                            contentDescription = context.getString(R.string.action_back)
+                        )
+                    }
+                }
+            )
+        }
+    ) { innerPadding ->
+        SettingsTabContent(
+            onRecreateRequested = onRecreateRequested,
+            contentPadding = PaddingValues(
+                start = 20.dp,
+                top = innerPadding.calculateTopPadding() + 12.dp,
+                end = 20.dp,
+                bottom = innerPadding.calculateBottomPadding() + 20.dp
+            )
+        )
+    }
+}
+
+@Composable
+fun SettingsTabContent(
+    onRecreateRequested: () -> Unit,
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(
+        start = 20.dp,
+        top = 12.dp,
+        end = 20.dp,
+        bottom = 20.dp
+    )
+) {
+    val context = LocalContext.current
     var dialogState by remember { mutableStateOf<SettingsDialogState?>(null) }
     val model = remember { buildSettingsModel(context) }
     val switchStates = remember { mutableStateMapOf<String, Boolean>() }
@@ -126,32 +165,12 @@ private fun SettingsScreenContent(
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(text = context.getString(R.string.settings_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateUp) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                            contentDescription = context.getString(R.string.action_back)
-                        )
-                    }
-                }
-            )
-        }
-    ) { innerPadding ->
-        Surface(modifier = Modifier.fillMaxSize()) {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    start = 20.dp,
-                    top = innerPadding.calculateTopPadding() + 12.dp,
-                    end = 20.dp,
-                    bottom = innerPadding.calculateBottomPadding() + 20.dp
-                ),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
+    Surface(modifier = modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = contentPadding,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
                 items(model) { section ->
                     SettingsSectionCard(
                         title = section.title,
@@ -242,7 +261,6 @@ private fun SettingsScreenContent(
                 }
             }
         }
-    }
 
     when (val state = dialogState) {
         SettingsDialogState.Language -> {
