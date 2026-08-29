@@ -8,6 +8,7 @@
     <uses-permission android:name="moe.shizuku.manager.permission.MANAGER" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"
         tools:ignore="LeanbackUsesWifi" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -35,7 +36,6 @@
     <permission
         android:name="moe.shizuku.manager.permission.MANAGER"
         android:protectionLevel="signature" />
-    <uses-permission android:name="moe.shizuku.manager.permission.MANAGER" />
 
     <permission
         android:name="moe.shizuku.manager.permission.API_V23"
@@ -44,9 +44,6 @@
         android:label="@string/permission_label"
         android:permissionGroup="moe.shizuku.manager.permission-group.API"
         android:protectionLevel="dangerous" />
-    <uses-permission
-        android:name="moe.shizuku.manager.permission.API_V23"
-        tools:node="remove" />
 
     <permission
         android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
@@ -226,7 +223,6 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="${applicationId}.START" />
-                <action android:name="moe.shizuku.privileged.api.START" />
             </intent-filter>
         </receiver>
 
@@ -236,7 +232,6 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="${applicationId}.STOP" />
-                <action android:name="moe.shizuku.privileged.api.STOP" />
             </intent-filter>
         </receiver>
 

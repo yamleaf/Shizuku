@@ -2,8 +2,14 @@ package moe.shizuku.manager.home
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
+import android.graphics.Bitmap
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +26,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,7 +38,6 @@ import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.PlayCircleOutline
 import androidx.compose.material.icons.outlined.RocketLaunch
-import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.Terminal
@@ -53,6 +59,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -62,21 +69,30 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import moe.shizuku.manager.Helps
 import moe.shizuku.manager.R
 import moe.shizuku.manager.ShizukuSettings
+import moe.shizuku.manager.authorization.AuthorizationManager
 import moe.shizuku.manager.model.ServiceStatus
 import moe.shizuku.manager.settings.SettingsTabContent
 import moe.shizuku.manager.starter.Starter
 import moe.shizuku.manager.ui.theme.ShizukuComposeTheme
+import moe.shizuku.manager.utils.AppIconCache
 import moe.shizuku.manager.utils.EnvironmentUtils
+import moe.shizuku.manager.utils.SettingsHelper
 import moe.shizuku.manager.utils.UserHandleCompat
 import rikka.html.text.HtmlCompat
 import androidx.core.net.toUri
@@ -85,10 +101,18 @@ private const val TAB_LAUNCH = 0
 private const val TAB_RUNNING = 1
 private const val TAB_SETTINGS = 2
 
+// Expected Shizuku version bundled in this app (api/manifest.gradle.kts).
+private const val SHIZUKU_API_VERSION = 13
+private const val SHIZUKU_PATCH_VERSION = 6
+
+private const val ADB_WIFI_ENABLED_KEY = "adb_wifi_enabled"
+private const val ADB_KEY_PREF = "adbkey"
+
 @Composable
 fun HomeComposeScreen(
     status: ServiceStatus?,
     grantedCount: Int?,
+    apps: List<PackageInfo> = emptyList(),
     onNavigateBack: () -> Unit,
     onRecreateRequested: () -> Unit,
     onStopService: () -> Unit,
@@ -102,12 +126,14 @@ fun HomeComposeScreen(
     onCopyAdbCommand: () -> Unit,
     onSendAdbCommand: () -> Unit,
     onOpenAdbPermissionHelp: () -> Unit,
+    onOpenBatteryOptimization: () -> Unit,
     onOpenLearnMore: () -> Unit
 ) {
     ShizukuComposeTheme {
         HomeScreenContent(
             status = status,
             grantedCount = grantedCount,
+            apps = apps,
             onNavigateBack = onNavigateBack,
             onRecreateRequested = onRecreateRequested,
             onStopService = onStopService,
@@ -121,6 +147,7 @@ fun HomeComposeScreen(
             onCopyAdbCommand = onCopyAdbCommand,
             onSendAdbCommand = onSendAdbCommand,
             onOpenAdbPermissionHelp = onOpenAdbPermissionHelp,
+            onOpenBatteryOptimization = onOpenBatteryOptimization,
             onOpenLearnMore = onOpenLearnMore
         )
     }
@@ -131,6 +158,7 @@ fun HomeComposeScreen(
 private fun HomeScreenContent(
     status: ServiceStatus?,
     grantedCount: Int?,
+    apps: List<PackageInfo> = emptyList(),
     onNavigateBack: () -> Unit,
     onRecreateRequested: () -> Unit,
     onStopService: () -> Unit,
@@ -144,6 +172,7 @@ private fun HomeScreenContent(
     onCopyAdbCommand: () -> Unit,
     onSendAdbCommand: () -> Unit,
     onOpenAdbPermissionHelp: () -> Unit,
+    onOpenBatteryOptimization: () -> Unit,
     onOpenLearnMore: () -> Unit
 ) {
     val context = LocalContext.current
@@ -168,6 +197,7 @@ private fun HomeScreenContent(
                 onOpenWirelessGuide = onOpenWirelessGuide,
                 onPairWireless = onPairWireless,
                 onStartWirelessAdb = onStartWirelessAdb,
+                onOpenTerminal = onOpenTerminal,
                 onOpenLearnMore = onOpenLearnMore
             )
         )
@@ -180,27 +210,45 @@ private fun HomeScreenContent(
                 onClick = { dialog = HomeDialog.About }
             )
         )
-        if (running) {
-            add(
-                HomeUiItem.Action(
-                    title = context.getString(R.string.action_stop),
-                    summary = context.getString(R.string.dialog_stop_message),
-                    icon = Icons.Outlined.Stop,
-                    tonal = false,
-                    onClick = { dialog = HomeDialog.Stop }
-                )
-            )
+    }
+
+    val authorizedPackages = remember(apps, running) {
+        if (!running) emptyList()
+        else apps.filter { pkg ->
+            val ai = pkg.applicationInfo
+            ai != null && AuthorizationManager.granted(pkg.packageName, ai.uid)
         }
     }
 
     val runningActions = buildRunningActions(
         context = context,
         status = resolvedStatus,
-        grantedCount = grantedCount,
-        onManageApps = onManageApps,
-        onOpenTerminal = onOpenTerminal,
-        onOpenAdbPermissionHelp = onOpenAdbPermissionHelp
+        wirelessAutostartEnabled = ShizukuSettings.getPreferences()
+            .getBoolean(ShizukuSettings.KEEP_START_ON_BOOT_WIRELESS, false),
+        onOpenAdbPermissionHelp = onOpenAdbPermissionHelp,
+        onOpenBatteryOptimization = onOpenBatteryOptimization,
+        onStopService = { dialog = HomeDialog.Stop }
     )
+
+    val statusSummary = if (running) {
+        val launchUser = if (resolvedStatus.uid == 0) "root" else "adb"
+        val serverVersion = resolvedStatus.versionName
+        val updateAvailable = resolvedStatus.apiVersion < SHIZUKU_API_VERSION ||
+            (resolvedStatus.apiVersion == SHIZUKU_API_VERSION &&
+                resolvedStatus.patchVersion in 0 until SHIZUKU_PATCH_VERSION)
+        if (updateAvailable) {
+            plainText(
+                context.getString(
+                    R.string.home_status_service_version_update,
+                    launchUser,
+                    serverVersion,
+                    "$SHIZUKU_API_VERSION.$SHIZUKU_PATCH_VERSION"
+                )
+            )
+        } else {
+            context.getString(R.string.home_status_service_version, launchUser, serverVersion)
+        }
+    } else null
 
     val statusItem = HomeUiItem.Status(
         title = if (running) {
@@ -208,13 +256,7 @@ private fun HomeScreenContent(
         } else {
             context.getString(R.string.home_status_service_not_running, context.getString(R.string.app_name))
         },
-        summary = if (running) {
-            context.getString(
-                R.string.home_status_service_version,
-                if (resolvedStatus.uid == 0) "root" else "adb",
-                resolvedStatus.versionName
-            )
-        } else null,
+        summary = statusSummary,
         running = running
     )
 
@@ -251,6 +293,7 @@ private fun HomeScreenContent(
                 contentPadding = contentPadding,
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                item { EnvironmentStatusCard() }
                 items(launchItems) { item -> ActionCard(item) }
             }
 
@@ -266,6 +309,19 @@ private fun HomeScreenContent(
                     } else {
                         NotRunningHint()
                     }
+                }
+                item {
+                    AutostartStatusCard(
+                        enabledOnBootRoot = ShizukuSettings.getPreferences()
+                            .getBoolean(ShizukuSettings.KEEP_START_ON_BOOT, false),
+                        enabledOnBootWireless = ShizukuSettings.getPreferences()
+                            .getBoolean(ShizukuSettings.KEEP_START_ON_BOOT_WIRELESS, false),
+                        watchdogEnabled = ShizukuSettings.getPreferences()
+                            .getBoolean(ShizukuSettings.WATCHDOG_ENABLED_ADB, false)
+                    )
+                }
+                if (running && resolvedStatus.permission) {
+                    item { AuthorizedAppsPreviewCard(packages = authorizedPackages, onManageApps = onManageApps) }
                 }
                 items(runningActions) { item -> ActionCard(item) }
             }
@@ -541,10 +597,11 @@ private fun buildLaunchItems(
     onOpenWirelessGuide: () -> Unit,
     onPairWireless: () -> Unit,
     onStartWirelessAdb: () -> Unit,
+    onOpenTerminal: () -> Unit,
     onOpenLearnMore: () -> Unit
-): List<HomeUiItem> {
+): List<HomeUiItem.Action> {
     val running = status.isRunning
-    val items = mutableListOf<HomeUiItem>()
+    val items = mutableListOf<HomeUiItem.Action>()
 
     if (UserHandleCompat.myUserId() == 0) {
         val root = EnvironmentUtils.isRooted()
@@ -593,48 +650,26 @@ private fun buildLaunchItems(
         enabled = true,
         onClick = onOpenLearnMore
     )
+    items += HomeUiItem.Action(
+        title = context.getString(R.string.home_terminal_title),
+        summary = context.getString(R.string.home_terminal_description),
+        icon = Icons.Outlined.Terminal,
+        enabled = true,
+        onClick = onOpenTerminal
+    )
     return items
 }
 
 private fun buildRunningActions(
     context: Context,
     status: ServiceStatus,
-    grantedCount: Int?,
-    onManageApps: () -> Unit,
-    onOpenTerminal: () -> Unit,
-    onOpenAdbPermissionHelp: () -> Unit
-): List<HomeUiItem> {
+    wirelessAutostartEnabled: Boolean,
+    onOpenAdbPermissionHelp: () -> Unit,
+    onOpenBatteryOptimization: () -> Unit,
+    onStopService: () -> Unit
+): List<HomeUiItem.Action> {
     val running = status.isRunning
-    val items = mutableListOf<HomeUiItem>()
-
-    if (status.permission) {
-        items += HomeUiItem.Action(
-            title = context.getQuantityString(
-                R.plurals.home_app_management_authorized_apps_count,
-                grantedCount ?: 0,
-                grantedCount ?: 0
-            ),
-            summary = if (running) {
-                context.getString(R.string.home_app_management_view_authorized_apps)
-            } else {
-                context.getString(R.string.home_status_service_not_running, context.getString(R.string.app_name))
-            },
-            icon = Icons.Outlined.Security,
-            enabled = running,
-            onClick = onManageApps
-        )
-        items += HomeUiItem.Action(
-            title = context.getString(R.string.home_terminal_title),
-            summary = if (running) {
-                context.getString(R.string.home_terminal_description)
-            } else {
-                context.getString(R.string.home_status_service_not_running, context.getString(R.string.app_name))
-            },
-            icon = Icons.Outlined.Terminal,
-            enabled = running,
-            onClick = onOpenTerminal
-        )
-    }
+    val items = mutableListOf<HomeUiItem.Action>()
 
     if (running && !status.permission) {
         items += HomeUiItem.Action(
@@ -645,6 +680,29 @@ private fun buildRunningActions(
             tonal = false,
             primaryActionLabel = context.getString(R.string.home_adb_button_view_help),
             onPrimaryAction = onOpenAdbPermissionHelp
+        )
+    }
+
+    if (running && wirelessAutostartEnabled && !SettingsHelper.isIgnoringBatteryOptimizations(context)) {
+        items += HomeUiItem.Action(
+            title = context.getString(R.string.settings_battery_optimization),
+            summary = context.getString(R.string.running_battery_optimization_warning),
+            icon = Icons.Outlined.Warning,
+            enabled = true,
+            tonal = false,
+            primaryActionLabel = context.getString(R.string.settings_title),
+            onPrimaryAction = onOpenBatteryOptimization
+        )
+    }
+
+    if (running) {
+        items += HomeUiItem.Action(
+            title = context.getString(R.string.action_stop),
+            summary = context.getString(R.string.dialog_stop_message),
+            icon = Icons.Outlined.Stop,
+            enabled = true,
+            tonal = false,
+            onClick = onStopService
         )
     }
     return items
@@ -678,6 +736,181 @@ private fun rootItem(
     primaryActionLabel = if (rootRestart) context.getString(R.string.home_root_button_restart) else context.getString(R.string.home_root_button_start),
     onPrimaryAction = if (rootRestart) onRestartRoot else onStartRoot
 )
+
+@Composable
+private fun InfoCard(title: String, rows: List<Pair<String, String>>) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.7f),
+            contentColor = MaterialTheme.colorScheme.onSurface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = MaterialTheme.shapes.extraLarge
+    ) {
+        Column(modifier = Modifier
+            .fillMaxWidth()
+            .padding(24.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(10.dp))
+            rows.forEach { (label, value) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(text = value, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EnvironmentStatusCard() {
+    val context = LocalContext.current
+    val prefs = ShizukuSettings.getPreferences()
+    val wirelessDebugging = Settings.Global.getInt(context.contentResolver, ADB_WIFI_ENABLED_KEY, 0) > 0
+    val paired = prefs.contains(ADB_KEY_PREF)
+    val systemPort = EnvironmentUtils.getAdbTcpPort()
+    val configuredPort = prefs.getString(ShizukuSettings.TCPIP_PORT, "")?.trim().orEmpty()
+    val portText = buildString {
+        if (configuredPort.isNotEmpty()) append(configuredPort)
+        if (systemPort > 0) {
+            if (isNotEmpty()) append(" / ")
+            append(systemPort)
+        }
+    }.ifEmpty { "-" }
+    val on = context.getString(R.string.running_autostart_enabled)
+    val off = context.getString(R.string.running_autostart_disabled)
+
+    InfoCard(
+        title = context.getString(R.string.env_status_title),
+        rows = listOf(
+            context.getString(R.string.adb_pairing) to
+                if (paired) context.getString(R.string.env_status_paired) else context.getString(R.string.env_status_not_paired),
+            context.getString(R.string.env_status_wireless_debugging) to if (wirelessDebugging) on else off,
+            context.getString(R.string.env_status_tcp_adb) to if (systemPort > 0) on else off,
+            context.getString(R.string.env_status_port) to portText
+        )
+    )
+}
+
+@Composable
+private fun AutostartStatusCard(
+    enabledOnBootRoot: Boolean,
+    enabledOnBootWireless: Boolean,
+    watchdogEnabled: Boolean
+) {
+    val context = LocalContext.current
+    val on = context.getString(R.string.running_autostart_enabled)
+    val off = context.getString(R.string.running_autostart_disabled)
+
+    InfoCard(
+        title = context.getString(R.string.running_autostart_title),
+        rows = listOf(
+            context.getString(R.string.settings_start_on_boot) to if (enabledOnBootRoot) on else off,
+            context.getString(R.string.settings_start_on_boot_wireless) to if (enabledOnBootWireless) on else off,
+            context.getString(R.string.settings_watchdog_adb) to if (watchdogEnabled) on else off
+        )
+    )
+}
+
+@Composable
+private fun AuthorizedAppsPreviewCard(packages: List<PackageInfo>, onManageApps: () -> Unit) {
+    val context = LocalContext.current
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onManageApps() },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.7f),
+            contentColor = MaterialTheme.colorScheme.onSurface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = MaterialTheme.shapes.extraLarge
+    ) {
+        Column(modifier = Modifier.padding(24.dp)) {
+            Text(
+                text = context.resources.getQuantityString(
+                    R.plurals.home_app_management_authorized_apps_count,
+                    packages.size,
+                    packages.size
+                ),
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                text = context.getString(R.string.home_app_management_view_authorized_apps),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (packages.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                packages.take(6).forEach { pkg ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AppIcon(applicationInfo = pkg.applicationInfo, size = 34.dp)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = remember(pkg) {
+                                runCatching {
+                                    context.packageManager.getApplicationLabel(pkg.applicationInfo!!).toString()
+                                }.getOrDefault(pkg.packageName)
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppIcon(applicationInfo: ApplicationInfo?, size: Dp) {
+    if (applicationInfo == null) return
+    val context = LocalContext.current
+    val density = LocalDensity.current.density
+    val px = (size.value * density).toInt()
+    var bitmap by remember(applicationInfo) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(applicationInfo) {
+        bitmap = withContext(Dispatchers.IO) {
+            runCatching {
+                AppIconCache.getOrLoadBitmap(context, applicationInfo, UserHandleCompat.myUserId(), px)
+            }.getOrNull()
+        }
+    }
+    val loaded = bitmap
+    if (loaded != null) {
+        Image(
+            bitmap = loaded.asImageBitmap(),
+            contentDescription = null,
+            modifier = Modifier.size(size),
+            contentScale = ContentScale.Fit
+        )
+    } else {
+        Box(
+            modifier = Modifier
+                .size(size)
+                .background(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(8.dp)
+                )
+        )
+    }
+}
 
 @Composable
 private fun StatusCard(item: HomeUiItem.Status) {

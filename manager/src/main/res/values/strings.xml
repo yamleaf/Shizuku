@@ -99,6 +99,18 @@
     <string name="running_details_authorized_count">Authorized apps</string>
     <string name="running_status_not_running_hint">Shizuku is not running. Go to the Launch tab to start it.</string>
 
+    <!-- Home - Autostart & environment status -->
+    <string name="running_autostart_title">Autostart &amp; watchdog</string>
+    <string name="running_autostart_enabled">Enabled</string>
+    <string name="running_autostart_disabled">Disabled</string>
+    <string name="running_battery_optimization_warning">Battery optimization may restrict Shizuku\'s auto-start. Consider disabling it for reliability.</string>
+    <string name="env_status_title">ADB environment</string>
+    <string name="env_status_paired">Paired</string>
+    <string name="env_status_not_paired">Not paired</string>
+    <string name="env_status_wireless_debugging">Wireless debugging</string>
+    <string name="env_status_tcp_adb">TCP ADB</string>
+    <string name="env_status_port">Port</string>
+
     <!-- Home - Adb permissions limited -->
     <string name="home_adb_is_limited_title">You need to take an extra step</string>
     <string name="home_adb_is_limited_description">Your device manufacturer has restricted adb permissions and apps using Shizuku will not work properly.\n\nUsually, this limitation can be lifted by adjusting some options in \"Developer options\". Please read the help for details on how to do this.\n\nYou may need to restart Shizuku for the operation to take effect.</string>

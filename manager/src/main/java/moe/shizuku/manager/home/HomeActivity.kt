@@ -4,6 +4,7 @@ import android.Manifest.permission.WRITE_SECURE_SETTINGS
 import android.app.NotificationManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -29,6 +30,7 @@ import moe.shizuku.manager.starter.Starter
 import moe.shizuku.manager.starter.StarterActivity
 import moe.shizuku.manager.utils.CustomTabsHelper
 import moe.shizuku.manager.utils.EnvironmentUtils
+import moe.shizuku.manager.utils.SettingsHelper
 import moe.shizuku.manager.watchdog.WatchdogService
 import rikka.core.util.ClipboardUtils
 import rikka.lifecycle.Status
@@ -69,9 +71,11 @@ abstract class HomeActivity : AppActivity() {
         setContent {
             val serviceStatus by homeModel.serviceStatus.observeAsState()
             val grantedCount by appsModel.grantedCount.observeAsState()
+            val apps by appsModel.packages.observeAsState()
             HomeComposeScreen(
                 status = serviceStatus?.data,
                 grantedCount = grantedCount?.data,
+                apps = apps?.data ?: emptyList(),
                 onNavigateBack = { finish() },
                 onRecreateRequested = { recreate() },
                 onStopService = { stopService() },
@@ -118,6 +122,9 @@ abstract class HomeActivity : AppActivity() {
                 onOpenAdbPermissionHelp = {
                     CustomTabsHelper.launchUrlOrCopy(this, Helps.ADB_PERMISSION.get())
                 },
+                onOpenBatteryOptimization = {
+                    SettingsHelper.requestIgnoreBatteryOptimizations(this)
+                },
                 onOpenLearnMore = {
                     CustomTabsHelper.launchUrlOrCopy(this, Helps.HOME.get())
                 }
@@ -131,6 +138,7 @@ abstract class HomeActivity : AppActivity() {
     override fun onResume() {
         super.onResume()
         checkServerStatus()
+        appsModel.load()
     }
 
     override fun onNewIntent(intent: Intent) {
