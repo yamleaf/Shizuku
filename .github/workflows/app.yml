@@ -22,7 +22,7 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
       - name: Write key
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+        if: github.event_name != 'pull_request'
         run: |
           # Prefer NP-style secrets, then fall back to legacy KEYSTORE_* secrets.
           STORE_B64='${{ secrets.KEY_STORE }}'
