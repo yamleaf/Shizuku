@@ -113,7 +113,6 @@
     <string name="running_stats_title">Service statistics</string>
     <string name="running_stats_start_time">Start time</string>
     <string name="running_stats_uptime">Uptime</string>
-    <string name="running_stats_disconnects">Disconnects</string>
     <string name="running_stats_restarts">Restarts</string>
 
     <!-- Home - Adb permissions limited -->

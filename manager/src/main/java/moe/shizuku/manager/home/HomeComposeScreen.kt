@@ -120,7 +120,6 @@ fun HomeComposeScreen(
     grantedCount: Int?,
     apps: List<PackageInfo> = emptyList(),
     serverStartElapsedRealtime: Long = -1L,
-    disconnectCount: Int = 0,
     restartCount: Int = 0,
     onNavigateBack: () -> Unit,
     onRecreateRequested: () -> Unit,
@@ -144,7 +143,6 @@ fun HomeComposeScreen(
             grantedCount = grantedCount,
             apps = apps,
             serverStartElapsedRealtime = serverStartElapsedRealtime,
-            disconnectCount = disconnectCount,
             restartCount = restartCount,
             onNavigateBack = onNavigateBack,
             onRecreateRequested = onRecreateRequested,
@@ -172,7 +170,6 @@ private fun HomeScreenContent(
     grantedCount: Int?,
     apps: List<PackageInfo> = emptyList(),
     serverStartElapsedRealtime: Long = -1L,
-    disconnectCount: Int = 0,
     restartCount: Int = 0,
     onNavigateBack: () -> Unit,
     onRecreateRequested: () -> Unit,
@@ -329,7 +326,6 @@ private fun HomeScreenContent(
                     item {
                         ServiceStatsCard(
                             startElapsedRealtime = serverStartElapsedRealtime,
-                            disconnectCount = disconnectCount,
                             restartCount = restartCount
                         )
                     }
@@ -762,7 +758,7 @@ private fun rootItem(
 )
 
 @Composable
-private fun ServiceStatsCard(startElapsedRealtime: Long, disconnectCount: Int, restartCount: Int) {
+private fun ServiceStatsCard(startElapsedRealtime: Long, restartCount: Int) {
     val context = LocalContext.current
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(Unit) {
@@ -783,7 +779,6 @@ private fun ServiceStatsCard(startElapsedRealtime: Long, disconnectCount: Int, r
         rows = listOf(
             context.getString(R.string.running_stats_start_time) to startWallTime,
             context.getString(R.string.running_stats_uptime) to DateUtils.formatElapsedTime(runningSeconds),
-            context.getString(R.string.running_stats_disconnects) to disconnectCount.toString(),
             context.getString(R.string.running_stats_restarts) to restartCount.toString()
         )
     )

@@ -46,15 +46,11 @@ abstract class HomeActivity : AppActivity() {
     companion object {
         const val EXTRA_START_SERVICE_VIA_WADB = "moe.shizuku.manager.extra.START_SERVICE_VIA_WADB"
         private const val PREF_SERVER_START_ELAPSED = "server_start_elapsed_realtime"
-        private const val PREF_DISCONNECT_COUNT = "server_disconnect_count"
         private const val PREF_RESTART_COUNT = "server_restart_count"
     }
 
     private val serverStartElapsedRealtime = mutableLongStateOf(
         ShizukuSettings.getPreferences().getLong(PREF_SERVER_START_ELAPSED, -1L)
-    )
-    private val disconnectCount = mutableIntStateOf(
-        ShizukuSettings.getPreferences().getInt(PREF_DISCONNECT_COUNT, 0)
     )
     private val restartCount = mutableIntStateOf(
         ShizukuSettings.getPreferences().getInt(PREF_RESTART_COUNT, 0)
@@ -81,8 +77,6 @@ abstract class HomeActivity : AppActivity() {
 
     private val binderDeadListener = Shizuku.OnBinderDeadListener {
         serverWasDown = true
-        disconnectCount.intValue += 1
-        ShizukuSettings.getPreferences().edit { putInt(PREF_DISCONNECT_COUNT, disconnectCount.intValue) }
         checkServerStatus()
     }
 
@@ -111,7 +105,6 @@ abstract class HomeActivity : AppActivity() {
                 grantedCount = grantedCount?.data,
                 apps = apps?.data ?: emptyList(),
                 serverStartElapsedRealtime = serverStartElapsedRealtime.longValue,
-                disconnectCount = disconnectCount.intValue,
                 restartCount = restartCount.intValue,
                 onNavigateBack = { finish() },
                 onRecreateRequested = { recreate() },
