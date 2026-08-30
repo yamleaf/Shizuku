@@ -8,12 +8,16 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AlertDialog
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.core.content.edit
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.Observer
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -41,14 +45,44 @@ abstract class HomeActivity : AppActivity() {
 
     companion object {
         const val EXTRA_START_SERVICE_VIA_WADB = "moe.shizuku.manager.extra.START_SERVICE_VIA_WADB"
+        private const val PREF_SERVER_START_ELAPSED = "server_start_elapsed_realtime"
+        private const val PREF_DISCONNECT_COUNT = "server_disconnect_count"
+        private const val PREF_RESTART_COUNT = "server_restart_count"
     }
 
+    private val serverStartElapsedRealtime = mutableLongStateOf(
+        ShizukuSettings.getPreferences().getLong(PREF_SERVER_START_ELAPSED, -1L)
+    )
+    private val disconnectCount = mutableIntStateOf(
+        ShizukuSettings.getPreferences().getInt(PREF_DISCONNECT_COUNT, 0)
+    )
+    private val restartCount = mutableIntStateOf(
+        ShizukuSettings.getPreferences().getInt(PREF_RESTART_COUNT, 0)
+    )
+    private var serverWasDown = false
+
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
+        val now = SystemClock.elapsedRealtime()
+        val current = serverStartElapsedRealtime.longValue
+        // stale after a device reboot (elapsedRealtime restarts) or on first ever observation
+        val stale = current > now
+        if (serverWasDown && current >= 0) {
+            restartCount.intValue += 1
+            ShizukuSettings.getPreferences().edit { putInt(PREF_RESTART_COUNT, restartCount.intValue) }
+        }
+        if (current < 0 || serverWasDown || stale) {
+            serverStartElapsedRealtime.longValue = now
+            ShizukuSettings.getPreferences().edit { putLong(PREF_SERVER_START_ELAPSED, now) }
+        }
+        serverWasDown = false
         checkServerStatus()
         appsModel.load()
     }
 
     private val binderDeadListener = Shizuku.OnBinderDeadListener {
+        serverWasDown = true
+        disconnectCount.intValue += 1
+        ShizukuSettings.getPreferences().edit { putInt(PREF_DISCONNECT_COUNT, disconnectCount.intValue) }
         checkServerStatus()
     }
 
@@ -76,6 +110,9 @@ abstract class HomeActivity : AppActivity() {
                 status = serviceStatus?.data,
                 grantedCount = grantedCount?.data,
                 apps = apps?.data ?: emptyList(),
+                serverStartElapsedRealtime = serverStartElapsedRealtime.longValue,
+                disconnectCount = disconnectCount.intValue,
+                restartCount = restartCount.intValue,
                 onNavigateBack = { finish() },
                 onRecreateRequested = { recreate() },
                 onStopService = { stopService() },

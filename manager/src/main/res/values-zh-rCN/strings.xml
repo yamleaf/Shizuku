@@ -72,6 +72,11 @@
     <string name="env_status_wireless_debugging">无线调试</string>
     <string name="env_status_tcp_adb">TCP ADB</string>
     <string name="env_status_port">端口</string>
+    <string name="running_stats_title">服务统计</string>
+    <string name="running_stats_start_time">启动时间</string>
+    <string name="running_stats_uptime">运行时间</string>
+    <string name="running_stats_disconnects">掉线次数</string>
+    <string name="running_stats_restarts">重启次数</string>
     <string name="app_management_item_summary_requires_root">* 需要以 root 执行的 Shizuku</string>
     <string name="settings_translation_contributors">翻译贡献者</string>
     <string name="translation_contributors"/>

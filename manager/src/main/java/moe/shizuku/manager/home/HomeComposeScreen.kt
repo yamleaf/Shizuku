@@ -6,7 +6,9 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.graphics.Bitmap
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
+import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -62,6 +64,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -81,7 +84,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import java.text.DateFormat
+import java.util.Date
 import moe.shizuku.manager.Helps
 import moe.shizuku.manager.R
 import moe.shizuku.manager.ShizukuSettings
@@ -113,6 +119,9 @@ fun HomeComposeScreen(
     status: ServiceStatus?,
     grantedCount: Int?,
     apps: List<PackageInfo> = emptyList(),
+    serverStartElapsedRealtime: Long = -1L,
+    disconnectCount: Int = 0,
+    restartCount: Int = 0,
     onNavigateBack: () -> Unit,
     onRecreateRequested: () -> Unit,
     onStopService: () -> Unit,
@@ -134,6 +143,9 @@ fun HomeComposeScreen(
             status = status,
             grantedCount = grantedCount,
             apps = apps,
+            serverStartElapsedRealtime = serverStartElapsedRealtime,
+            disconnectCount = disconnectCount,
+            restartCount = restartCount,
             onNavigateBack = onNavigateBack,
             onRecreateRequested = onRecreateRequested,
             onStopService = onStopService,
@@ -159,6 +171,9 @@ private fun HomeScreenContent(
     status: ServiceStatus?,
     grantedCount: Int?,
     apps: List<PackageInfo> = emptyList(),
+    serverStartElapsedRealtime: Long = -1L,
+    disconnectCount: Int = 0,
+    restartCount: Int = 0,
     onNavigateBack: () -> Unit,
     onRecreateRequested: () -> Unit,
     onStopService: () -> Unit,
@@ -308,6 +323,15 @@ private fun HomeScreenContent(
                         RunningDetailsCard(status = resolvedStatus, grantedCount = grantedCount)
                     } else {
                         NotRunningHint()
+                    }
+                }
+                if (running) {
+                    item {
+                        ServiceStatsCard(
+                            startElapsedRealtime = serverStartElapsedRealtime,
+                            disconnectCount = disconnectCount,
+                            restartCount = restartCount
+                        )
                     }
                 }
                 item {
@@ -736,6 +760,34 @@ private fun rootItem(
     primaryActionLabel = if (rootRestart) context.getString(R.string.home_root_button_restart) else context.getString(R.string.home_root_button_start),
     onPrimaryAction = if (rootRestart) onRestartRoot else onStartRoot
 )
+
+@Composable
+private fun ServiceStatsCard(startElapsedRealtime: Long, disconnectCount: Int, restartCount: Int) {
+    val context = LocalContext.current
+    var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = SystemClock.elapsedRealtime()
+            delay(1000)
+        }
+    }
+    val valid = startElapsedRealtime >= 0
+    val runningSeconds = if (valid) ((now - startElapsedRealtime).coerceAtLeast(0L)) / 1000 else 0
+    val startWallTime = if (valid) {
+        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+            .format(Date(System.currentTimeMillis() - (now - startElapsedRealtime)))
+    } else "-"
+
+    InfoCard(
+        title = context.getString(R.string.running_stats_title),
+        rows = listOf(
+            context.getString(R.string.running_stats_start_time) to startWallTime,
+            context.getString(R.string.running_stats_uptime) to DateUtils.formatElapsedTime(runningSeconds),
+            context.getString(R.string.running_stats_disconnects) to disconnectCount.toString(),
+            context.getString(R.string.running_stats_restarts) to restartCount.toString()
+        )
+    )
+}
 
 @Composable
 private fun InfoCard(title: String, rows: List<Pair<String, String>>) {
