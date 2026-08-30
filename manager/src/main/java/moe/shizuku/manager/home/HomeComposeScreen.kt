@@ -457,7 +457,7 @@ private fun FloatingNavigationBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .shadow(elevation = 8.dp, shape = RoundedCornerShape(28.dp), clip = true),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.9f),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 0.dp,
             windowInsets = WindowInsets(0, 0, 0, 0)
         ) {
