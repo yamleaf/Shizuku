@@ -205,14 +205,18 @@ public class ShizukuService extends Service<ShizukuUserServiceManager, ShizukuCl
 
         isManager = MANAGER_APPLICATION_ID.equals(requestPackageName);
 
-        if (clientManager.findClient(callingUid, callingPid) == null) {
-            synchronized (this) {
+        // 已 attach 过则复用现有记录（避免重复 addClient），否则新建。
+        // 原实现仅当 findClient==null 时 addClient，但 clientRecord 只在新建分支里被赋值，
+        // 已存在时后续 requireNonNull(clientRecord).allowed 会抛 NPE（重复 attach 场景）。
+        synchronized (this) {
+            clientRecord = clientManager.findClient(callingUid, callingPid);
+            if (clientRecord == null) {
                 clientRecord = clientManager.addClient(callingUid, callingPid, application, requestPackageName, apiVersion);
             }
-            if (clientRecord == null) {
-                LOGGER.w("Add client failed");
-                return;
-            }
+        }
+        if (clientRecord == null) {
+            LOGGER.w("Add client failed");
+            return;
         }
 
         LOGGER.d("attachApplication: %s %d %d", requestPackageName, callingUid, callingPid);
