@@ -340,7 +340,7 @@ private fun HomeScreenContent(
                             .getBoolean(ShizukuSettings.WATCHDOG_ENABLED_ADB, false)
                     )
                 }
-                if (running && resolvedStatus.permission) {
+                if (running && resolvedStatus.canGrantRuntimePermission) {
                     item { AuthorizedAppsPreviewCard(packages = authorizedPackages, onManageApps = onManageApps) }
                 }
                 items(runningActions) { item -> ActionCard(item) }
@@ -502,7 +502,7 @@ private fun RunningDetailsCard(status: ServiceStatus, grantedCount: Int?) {
             add(
                 context.getString(R.string.running_details_permission) to
                     context.getString(
-                        if (status.permission) R.string.running_details_permission_granted
+                        if (status.canGrantRuntimePermission) R.string.running_details_permission_granted
                         else R.string.running_details_permission_not_granted
                     )
             )
@@ -691,7 +691,7 @@ private fun buildRunningActions(
     val running = status.isRunning
     val items = mutableListOf<HomeUiItem.Action>()
 
-    if (running && !status.permission) {
+    if (running && !status.canGrantRuntimePermission) {
         items += HomeUiItem.Action(
             title = context.getString(R.string.home_adb_is_limited_title),
             summary = context.getString(R.string.home_adb_is_limited_description),
