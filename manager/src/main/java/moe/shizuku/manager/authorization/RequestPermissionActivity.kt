@@ -22,11 +22,14 @@ import rikka.shizuku.ShizukuApiConstants.REQUEST_PERMISSION_REPLY_IS_ONETIME
 import rikka.shizuku.server.ktx.workerHandler
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 
 class RequestPermissionActivity : AppActivity() {
 
+    private var resultSent = false
+
     private fun setResult(requestUid: Int, requestPid: Int, requestCode: Int, allowed: Boolean, onetime: Boolean) {
+        if (resultSent) return
+        resultSent = true
         val data = Bundle()
         data.putBoolean(REQUEST_PERMISSION_REPLY_ALLOWED, allowed)
         data.putBoolean(REQUEST_PERMISSION_REPLY_IS_ONETIME, onetime)
@@ -37,7 +40,12 @@ class RequestPermissionActivity : AppActivity() {
         }
     }
 
-    private fun checkSelfPermission(): Boolean {
+    private fun checkSelfPermission(clientApiVersion: Int): Boolean {
+        val requiresRuntimePermission = Shizuku.isPreV11() || (clientApiVersion in 1 until 11)
+        if (!requiresRuntimePermission) {
+            return true
+        }
+
         val permission = Shizuku.checkRemotePermission("android.permission.GRANT_RUNTIME_PERMISSIONS") == PackageManager.PERMISSION_GRANTED
         if (permission) return true
 
@@ -73,12 +81,27 @@ class RequestPermissionActivity : AppActivity() {
 
         Shizuku.addBinderReceivedListenerSticky(listener, workerHandler)
 
-        return try {
+        val received = try {
             countDownLatch.await(5, TimeUnit.SECONDS)
-            true
-        } catch (e: TimeoutException) {
-            LOGGER.e(e, "Binder not received in 5s")
+        } catch (e: InterruptedException) {
+            LOGGER.e(e, "Interrupted while waiting for binder")
             false
+        }
+
+        if (!received) {
+            Shizuku.removeBinderReceivedListener(listener)
+            LOGGER.e("Binder not received in 5s")
+        }
+        return received
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        val uid = intent?.getIntExtra("uid", -1) ?: -1
+        val pid = intent?.getIntExtra("pid", -1) ?: -1
+        val requestCode = intent?.getIntExtra("requestCode", -1) ?: -1
+        if (!resultSent && uid != -1 && pid != -1 && requestCode != -1) {
+            setResult(uid, pid, requestCode, allowed = false, onetime = true)
         }
     }
 
@@ -98,7 +121,8 @@ class RequestPermissionActivity : AppActivity() {
             finish()
             return
         }
-        if (!checkSelfPermission()) {
+        val clientApiVersion = intent.getIntExtra("apiVersion", -1)
+        if (!checkSelfPermission(clientApiVersion)) {
             setResult(uid, pid, requestCode, allowed = false, onetime = true)
             return
         }

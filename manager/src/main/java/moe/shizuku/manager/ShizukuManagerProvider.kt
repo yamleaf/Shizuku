@@ -10,7 +10,6 @@ import rikka.shizuku.ShizukuProvider
 import rikka.shizuku.server.ktx.workerHandler
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 
 class ShizukuManagerProvider : ShizukuProvider() {
 
@@ -58,13 +57,18 @@ class ShizukuManagerProvider : ShizukuProvider() {
 
                 Shizuku.addBinderReceivedListenerSticky(listener, workerHandler)
 
-                return try {
+                val received = try {
                     countDownLatch.await(5, TimeUnit.SECONDS)
-                    reply
-                } catch (e: TimeoutException) {
-                    LOGGER.e(e, "Binder not received in 5s")
-                    null
+                } catch (e: InterruptedException) {
+                    LOGGER.e(e, "Interrupted while waiting for binder")
+                    false
                 }
+                if (!received) {
+                    Shizuku.removeBinderReceivedListener(listener)
+                    LOGGER.e("Binder not received in 5s")
+                    return null
+                }
+                return reply
             } catch (e: Throwable) {
                 LOGGER.e(e, "sendUserService")
                 null

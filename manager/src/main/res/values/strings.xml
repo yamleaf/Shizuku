@@ -116,8 +116,8 @@
     <string name="running_stats_restarts">Restarts</string>
 
     <!-- Home - Adb permissions limited -->
-    <string name="home_adb_is_limited_title">You need to take an extra step</string>
-    <string name="home_adb_is_limited_description">Your device manufacturer has restricted adb permissions and apps using Shizuku will not work properly.\n\nUsually, this limitation can be lifted by adjusting some options in \"Developer options\". Please read the help for details on how to do this.\n\nYou may need to restart Shizuku for the operation to take effect.</string>
+    <string name="home_adb_is_limited_title">ADB permissions are restricted</string>
+    <string name="home_adb_is_limited_description">Your device manufacturer has restricted ADB runtime permissions. Shizuku app management and terminal will work normally, but advanced features requiring system settings (such as wireless debugging auto-start or pre-API v11 apps) may not work properly.\n\nIf your device has an option such as \"Disable permission monitoring\" in Developer options, you can enable it to lift this restriction.</string>
 
     <!-- Application management -->
     <string name="app_management_dialog_adb_is_limited_title">The permission of adb is limited</string>
@@ -260,4 +260,33 @@ With %1$s, in any terminal app, you can connect to and interact with the shell r
     <string name="manual">Manual</string>
     <string name="auto">Auto</string>
     <string name="settings_grant_note"><![CDATA[<h1>Note</h1>\n<p>This feature requires <u><tt>WRITE_SECURE_SETTINGS</tt></u> permission.</p>\n<h1>Warning</h1>\n<p><u><tt>WRITE_SECURE_SETTINGS</tt></u> is a very sensitive permission and enable it only if you know what you\'re doing. I\'m not responsible for whatever may happen later on.</p>]]></string>
+
+    <!-- Batch Application Management -->
+    <string name="action_select_all">Select all</string>
+    <string name="action_deselect_all">Deselect all</string>
+    <string name="action_batch_management">Batch management</string>
+    <string name="action_grant_selected">Grant selected</string>
+    <string name="action_revoke_selected">Revoke selected</string>
+    <string name="action_grant_all">Grant all</string>
+    <string name="action_revoke_all">Revoke all</string>
+    <string name="batch_selected_count">%1$d selected</string>
+    <string name="dialog_confirm_grant_all_title">Grant all apps</string>
+    <string name="dialog_confirm_grant_all_message">Are you sure you want to grant Shizuku permission to all apps?</string>
+    <string name="dialog_confirm_revoke_all_title">Revoke all apps</string>
+    <string name="dialog_confirm_revoke_all_message">Are you sure you want to revoke Shizuku permission from all apps?</string>
+
+    <!-- Quick Settings Tile -->
+    <string name="tile_title">Shizuku</string>
+    <string name="tile_running">Running</string>
+    <string name="tile_stopped">Stopped</string>
+    <string name="tile_action_open">Open Shizuku</string>
+    <string name="tile_action_settings">Open Settings</string>
+    <string name="tile_action_restart">Restart Service</string>
+    <string name="tile_action_stop">Stop Service</string>
+    <string name="tile_service_stopped_toast">Shizuku service stopped</string>
+    <string name="tile_service_starting_toast">Starting Shizuku…</string>
+
+    <!-- Developer Options Navigation -->
+    <string name="dialog_developer_options_required_title">Developer options disabled</string>
+    <string name="dialog_developer_options_required_message">Please enable Developer options in system settings first, then turn on Wireless debugging.</string>
 </resources>

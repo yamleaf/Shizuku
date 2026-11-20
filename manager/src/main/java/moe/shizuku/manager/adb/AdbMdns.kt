@@ -4,20 +4,30 @@ import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.lifecycle.Observer
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asExecutor
 import java.io.IOException
-import java.net.InetSocketAddress
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.ServerSocket
+import java.net.Socket
 import java.util.concurrent.Executor
+
+data class AdbMdnsResult(val host: String, val port: Int) {
+    val isValid: Boolean get() = port in 1..65535 && host.isNotBlank()
+}
 
 @RequiresApi(Build.VERSION_CODES.R)
 class AdbMdns(
-    context: Context, private val serviceType: String,
-    private val observer: Observer<Int>
+    context: Context,
+    private val serviceType: String,
+    private val observer: Observer<AdbMdnsResult>
 ) {
 
     private var registered = false
@@ -25,7 +35,8 @@ class AdbMdns(
     private var serviceName: String? = null
     private val listener = DiscoveryListener(this)
     private val nsdManager: NsdManager = context.getSystemService(NsdManager::class.java)
-    private val executor: Executor = context.mainExecutor
+    private val ioExecutor: Executor = Dispatchers.IO.asExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     fun start() {
         if (running) return
@@ -57,32 +68,55 @@ class AdbMdns(
     }
 
     private fun onServiceFound(info: NsdServiceInfo) {
+        @Suppress("DEPRECATION")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            nsdManager.resolveService(info, executor, ResolveListener(this))
+            nsdManager.resolveService(info, ioExecutor, ResolveListener(this))
         } else {
-            @Suppress("DEPRECATION")
             nsdManager.resolveService(info, ResolveListener(this))
         }
     }
 
     private fun onServiceLost(info: NsdServiceInfo) {
-        if (info.serviceName == serviceName) observer.onChanged(-1)
+        if (info.serviceName == serviceName) {
+            serviceName = null
+            mainHandler.post {
+                observer.onChanged(AdbMdnsResult("", -1))
+            }
+        }
     }
 
     private fun onServiceResolved(resolvedService: NsdServiceInfo) {
-        val resolvedHosts = resolvedService.resolvedHosts()
-        if (running && NetworkInterface.getNetworkInterfaces()
-                .asSequence()
-                .any { networkInterface ->
-                    networkInterface.inetAddresses
-                        .asSequence()
-                        .any { address -> resolvedHosts.any { it.hostAddress == address.hostAddress } }
+        ioExecutor.execute {
+            if (!running) return@execute
+
+            val resolvedHosts = resolvedService.resolvedHosts()
+            val matchedHost = findLocalMatchingHost(resolvedHosts) ?: return@execute
+
+            if (running && isPortAvailable(matchedHost, resolvedService.port)) {
+                serviceName = resolvedService.serviceName
+                val result = AdbMdnsResult(matchedHost, resolvedService.port)
+                mainHandler.post {
+                    if (running) {
+                        observer.onChanged(result)
+                    }
                 }
-            && isPortAvailable(resolvedService.port)
-        ) {
-            serviceName = resolvedService.serviceName
-            observer.onChanged(resolvedService.port)
+            }
         }
+    }
+
+    private fun findLocalMatchingHost(resolvedHosts: List<InetAddress>): String? {
+        val localAddresses = runCatching {
+            NetworkInterface.getNetworkInterfaces()
+                ?.asSequence()
+                ?.flatMap { it.inetAddresses.asSequence() }
+                ?.mapNotNull { it.hostAddress }
+                ?.toSet()
+        }.getOrNull() ?: emptySet()
+
+        return resolvedHosts.firstOrNull { host ->
+            val addr = host.hostAddress
+            addr != null && addr in localAddresses
+        }?.hostAddress ?: resolvedHosts.firstOrNull()?.hostAddress
     }
 
     private fun NsdServiceInfo.resolvedHosts(): List<InetAddress> {
@@ -94,19 +128,27 @@ class AdbMdns(
         }
     }
 
-    private fun isPortAvailable(port: Int) = try {
-        ServerSocket().use {
-            it.bind(InetSocketAddress("127.0.0.1", port), 1)
-            false
+    private fun isPortAvailable(host: String, port: Int): Boolean {
+        return try {
+            Socket().use {
+                it.connect(InetSocketAddress(host, port), 200)
+                true
+            }
+        } catch (_: IOException) {
+            try {
+                ServerSocket().use {
+                    it.bind(InetSocketAddress(host, port), 1)
+                    false
+                }
+            } catch (_: IOException) {
+                true
+            }
         }
-    } catch (e: IOException) {
-        true
     }
 
     internal class DiscoveryListener(private val adbMdns: AdbMdns) : NsdManager.DiscoveryListener {
         override fun onDiscoveryStarted(serviceType: String) {
             Log.v(TAG, "onDiscoveryStarted: $serviceType")
-
             adbMdns.onDiscoveryStart()
         }
 
@@ -116,7 +158,6 @@ class AdbMdns(
 
         override fun onDiscoveryStopped(serviceType: String) {
             Log.v(TAG, "onDiscoveryStopped: $serviceType")
-
             adbMdns.onDiscoveryStop()
         }
 
@@ -126,13 +167,11 @@ class AdbMdns(
 
         override fun onServiceFound(serviceInfo: NsdServiceInfo) {
             Log.v(TAG, "onServiceFound: ${serviceInfo.serviceName}")
-
             adbMdns.onServiceFound(serviceInfo)
         }
 
         override fun onServiceLost(serviceInfo: NsdServiceInfo) {
             Log.v(TAG, "onServiceLost: ${serviceInfo.serviceName}")
-
             adbMdns.onServiceLost(serviceInfo)
         }
     }
@@ -143,7 +182,6 @@ class AdbMdns(
         override fun onServiceResolved(nsdServiceInfo: NsdServiceInfo) {
             adbMdns.onServiceResolved(nsdServiceInfo)
         }
-
     }
 
     companion object {

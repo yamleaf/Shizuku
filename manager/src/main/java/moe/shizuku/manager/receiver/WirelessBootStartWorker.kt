@@ -39,6 +39,7 @@ import moe.shizuku.manager.adb.AdbClient
 import moe.shizuku.manager.adb.AdbKey
 import moe.shizuku.manager.adb.AdbKeyException
 import moe.shizuku.manager.adb.AdbMdns
+import moe.shizuku.manager.adb.AdbMdnsResult
 import moe.shizuku.manager.adb.AdbWirelessHelper
 import moe.shizuku.manager.adb.PreferenceAdbKeyStore
 import moe.shizuku.manager.starter.Starter
@@ -100,12 +101,16 @@ class WirelessBootStartWorker(
                 }
             }
 
-            val resolvedPort = startablePort ?: withContext(Dispatchers.IO) {
-                discoverWirelessAdbPort()
+            val target = if (startablePort != null && startablePort in 1..65535) {
+                AdbMdnsResult("127.0.0.1", startablePort)
+            } else {
+                withContext(Dispatchers.IO) {
+                    runCatching { discoverWirelessAdbTarget() }.getOrNull()
+                }
             }
 
-            if (resolvedPort <= 0) {
-                Log.w(AppConstants.TAG, "Failed to discover wireless ADB port")
+            if (target == null || !target.isValid) {
+                Log.w(AppConstants.TAG, "Failed to discover wireless ADB target")
                 if (runAttemptCount >= 5) {
                     BootStartNotifications.showFailure(
                         applicationContext,
@@ -117,8 +122,8 @@ class WirelessBootStartWorker(
                 return Result.retry()
             }
 
-            Log.i(AppConstants.TAG, "Starting Shizuku with wireless ADB on port $resolvedPort")
-            startViaAdbWithRetry("127.0.0.1", resolvedPort)
+            Log.i(AppConstants.TAG, "Starting Shizuku with wireless ADB on ${target.host}:${target.port}")
+            startViaAdbWithRetry(target.host, target.port)
 
             val binderStarted = withTimeoutOrNull(10_000L) {
                 while (!Shizuku.pingBinder()) {
@@ -179,9 +184,9 @@ class WirelessBootStartWorker(
         }
     }
 
-    private suspend fun discoverWirelessAdbPort(): Int {
+    private suspend fun discoverWirelessAdbTarget(): AdbMdnsResult? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            return -1
+            return null
         }
 
         return callbackFlow {
@@ -190,9 +195,9 @@ class WirelessBootStartWorker(
             var unlockReceiver: BroadcastReceiver? = null
             var timeoutJob: Job? = null
 
-            val adbMdns = AdbMdns(applicationContext, AdbMdns.TLS_CONNECT) { p ->
-                if (p in 1..65535) {
-                    trySend(p)
+            val adbMdns = AdbMdns(applicationContext, AdbMdns.TLS_CONNECT) { result ->
+                if (result.isValid) {
+                    trySend(result)
                 }
             }
 
@@ -210,20 +215,21 @@ class WirelessBootStartWorker(
             }
 
             fun handleKeyguardOrAuth() {
-                if (km.isKeyguardLocked || km.isDeviceLocked) {
+                if ((km.isKeyguardLocked || km.isDeviceLocked) && unlockReceiver == null) {
                     val filter = IntentFilter(Intent.ACTION_USER_PRESENT)
-                    unlockReceiver = object : BroadcastReceiver() {
+                    val receiver = object : BroadcastReceiver() {
                         override fun onReceive(context: Context, intent: Intent) {
                             if (intent.action == Intent.ACTION_USER_PRESENT) {
                                 runCatching { context.unregisterReceiver(this) }
                                 unlockReceiver = null
-                                Settings.Global.putInt(cr, "adb_wifi_enabled", 1)
+                                runCatching { Settings.Global.putInt(cr, "adb_wifi_enabled", 1) }
                             }
                         }
                     }
+                    unlockReceiver = receiver
                     ContextCompat.registerReceiver(
                         applicationContext,
-                        unlockReceiver,
+                        receiver,
                         filter,
                         ContextCompat.RECEIVER_NOT_EXPORTED
                     )
@@ -241,7 +247,7 @@ class WirelessBootStartWorker(
                 }
             }
 
-            Settings.Global.putInt(cr, "adb_wifi_enabled", 1)
+            runCatching { Settings.Global.putInt(cr, "adb_wifi_enabled", 1) }
             cr.registerContentObserver(Settings.Global.getUriFor("adb_wifi_enabled"), false, observer)
             startDiscoveryWithTimeout()
 
@@ -295,7 +301,23 @@ class WirelessBootStartWorker(
 
         fun getStartableAdbPort(): Int? = AdbWirelessHelper().getStartableAdbPort()
 
+        private fun isRunning(context: Context): Boolean = try {
+            WorkManager.getInstance(context)
+                .getWorkInfosForUniqueWork(UNIQUE_WORK_NAME)
+                .get(2, TimeUnit.SECONDS)
+                .any { it.state == WorkInfo.State.RUNNING }
+        } catch (_: Exception) {
+            false
+        }
+
         fun enqueue(context: Context) {
+            // Boot, unlock and Wi-Fi triggers arrive together; REPLACE would cancel an in-flight
+            // ADB start and restart it from scratch.
+            if (isRunning(context)) {
+                Log.i(AppConstants.TAG, "Wireless boot start already running, skip enqueue")
+                return
+            }
+
             val constraints = if (getStartableAdbPort() == null) {
                 BootStartNotifications.showWaitingForNetwork(context)
                 Constraints.Builder()

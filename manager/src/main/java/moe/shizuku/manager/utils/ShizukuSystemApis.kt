@@ -3,13 +3,13 @@ package moe.shizuku.manager.utils
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.RemoteException
-import rikka.shizuku.common.util.InstalledPackagesCompat
 import rikka.hidden.compat.PackageManagerApis
-import rikka.hidden.compat.PermissionManagerApis
 import rikka.hidden.compat.UserManagerApis
 import rikka.hidden.compat.util.SystemServiceBinder
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuBinderWrapper
+import rikka.shizuku.common.util.InstalledPackagesCompat
+import rikka.shizuku.server.util.Android17Compat
 
 object ShizukuSystemApis {
 
@@ -67,7 +67,7 @@ object ShizukuSystemApis {
         return if (!Shizuku.pingBinder()) {
             PackageManager.PERMISSION_DENIED
         } else try {
-            PermissionManagerApis.checkPermission(permName, pkgName, userId)
+            Android17Compat.checkPermission(permName, pkgName, userId)
         } catch (tr: RemoteException) {
             throw RuntimeException(tr.message, tr)
         }
@@ -78,7 +78,7 @@ object ShizukuSystemApis {
             return
         }
         try {
-            PermissionManagerApis.grantRuntimePermission(packageName, permissionName, userId)
+            Android17Compat.grantRuntimePermission(packageName, permissionName, userId)
         } catch (tr: RemoteException) {
             throw RuntimeException(tr.message, tr)
         }
@@ -89,7 +89,7 @@ object ShizukuSystemApis {
             return
         }
         try {
-            PermissionManagerApis.revokeRuntimePermission(packageName, permissionName, userId)
+            Android17Compat.revokeRuntimePermission(packageName, permissionName, userId)
         } catch (tr: RemoteException) {
             throw RuntimeException(tr.message, tr)
         }

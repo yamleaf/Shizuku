@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AlertDialog
@@ -21,9 +22,11 @@ import androidx.core.content.edit
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.Observer
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import moe.shizuku.manager.AppConstants
 import moe.shizuku.manager.Helps
 import moe.shizuku.manager.ShizukuSettings
 import moe.shizuku.manager.adb.AdbMdns
+import moe.shizuku.manager.adb.AdbMdnsResult
 import moe.shizuku.manager.adb.AdbPairingService
 import moe.shizuku.manager.adb.AdbWirelessHelper
 import moe.shizuku.manager.app.AppActivity
@@ -35,6 +38,7 @@ import moe.shizuku.manager.starter.StarterActivity
 import moe.shizuku.manager.utils.CustomTabsHelper
 import moe.shizuku.manager.utils.EnvironmentUtils
 import moe.shizuku.manager.utils.SettingsHelper
+import moe.shizuku.manager.utils.SettingsPage
 import moe.shizuku.manager.watchdog.WatchdogService
 import rikka.core.util.ClipboardUtils
 import rikka.lifecycle.Status
@@ -239,8 +243,8 @@ abstract class HomeActivity : AppActivity() {
         startActivity(Intent.createChooser(intent, getString(moe.shizuku.manager.R.string.home_adb_dialog_view_command_button_send)))
     }
 
-    private fun startWirelessAdb(port: Int) {
-        AdbWirelessHelper().launchStarterActivity(this, "127.0.0.1", port)
+    private fun startWirelessAdb(port: Int, host: String = "127.0.0.1") {
+        AdbWirelessHelper().launchStarterActivity(this, host, port)
     }
 
     private fun showWirelessAdbNotEnabledDialog() {
@@ -251,29 +255,22 @@ abstract class HomeActivity : AppActivity() {
     }
 
     private fun openDevelopmentSettings() {
-        val intent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            putExtra(":settings:fragment_args_key", "toggle_adb_wireless")
-        }
-        try {
-            startActivity(intent)
-        } catch (_: ActivityNotFoundException) {
-        }
+        SettingsPage.WirelessDebugging.launch(this)
     }
 
     private fun showWirelessAdbDiscoveryDialog() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
 
-        val discoveredPort = MutableLiveData<Int>()
+        val discoveredTarget = MutableLiveData<AdbMdnsResult>()
         val adbMdns = AdbMdns(this, AdbMdns.TLS_CONNECT) {
-            discoveredPort.postValue(it)
+            discoveredTarget.postValue(it)
         }
         val currentPort = EnvironmentUtils.getAdbTcpPort()
         var dialog: AlertDialog? = null
-        val observer = Observer<Int> {
-            if (it in 1..65535) {
+        val observer = Observer<AdbMdnsResult> {
+            if (it.isValid) {
                 dialog?.dismiss()
-                startWirelessAdb(it)
+                startWirelessAdb(it.port, it.host)
             }
         }
 
@@ -293,11 +290,15 @@ abstract class HomeActivity : AppActivity() {
         adbDialog.setCanceledOnTouchOutside(false)
         adbDialog.setOnShowListener {
             adbMdns.start()
-            discoveredPort.observe(this, observer)
+            discoveredTarget.observe(this, observer)
             if (checkSelfPermission(WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED) {
-                Settings.Global.putInt(contentResolver, "adb_wifi_enabled", 1)
-                Settings.Global.putInt(contentResolver, Settings.Global.ADB_ENABLED, 1)
-                Settings.Global.putLong(contentResolver, "adb_allowed_connection_time", 0L)
+                runCatching {
+                    Settings.Global.putInt(contentResolver, "adb_wifi_enabled", 1)
+                    Settings.Global.putInt(contentResolver, Settings.Global.ADB_ENABLED, 1)
+                    Settings.Global.putLong(contentResolver, "adb_allowed_connection_time", 0L)
+                }.onFailure {
+                    Log.w(AppConstants.TAG, "Failed to enable wireless debugging via secure settings (requires MANAGE_DEBUGGING on Android 15+)", it)
+                }
             }
             adbDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 openDevelopmentSettings()
@@ -308,7 +309,7 @@ abstract class HomeActivity : AppActivity() {
             }
         }
         adbDialog.setOnDismissListener {
-            discoveredPort.removeObserver(observer)
+            discoveredTarget.removeObserver(observer)
             adbMdns.stop()
         }
         adbDialog.show()
