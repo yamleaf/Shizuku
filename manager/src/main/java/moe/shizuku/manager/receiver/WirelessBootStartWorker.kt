@@ -147,11 +147,18 @@ class WirelessBootStartWorker(
                 Log.i(AppConstants.TAG, "Shizuku started successfully via WirelessBootStartWorker")
                 ShizukuSettings.setLastLaunchMode(ShizukuSettings.LaunchMethod.ADB)
                 
-                if (hasSecureSettingsPermission) {
+                if (hasSecureSettingsPermission && !remoteActivation) {
                     try {
                         Settings.Global.putInt(cr, "adb_wifi_enabled", 0)
                     } catch (_: Exception) {
                     }
+                } else if (remoteActivation) {
+                    // 无人值守场景保持无线调试打开：反复开关会触发 MIUI 的网络信任确认，
+                    // 且目前可信 BSSID 只覆盖用户实际点过「始终允许」的那个频段/AP。
+                    Log.i(
+                        AppConstants.TAG,
+                        "Keep wireless debugging enabled after remote activation to avoid repeat trust prompt"
+                    )
                 }
 
                 if (ShizukuSettings.getPreferences().getBoolean(ShizukuSettings.WATCHDOG_ENABLED_ADB, false)) {
