@@ -331,6 +331,12 @@ class WirelessBootStartWorker(
         /** 与 DailyTask ShizukuManager 发送的 extra 字面值保持一致 */
         const val KEY_REMOTE_ACTIVATION = "remote_activation"
 
+        /**
+         * WorkInfo 不暴露 inputData，只能用 tag 区分远程激活 Work。
+         * 感知远程/非远程运行态时依赖这个 tag，避免用不存在的 WorkInfo.inputData。
+         */
+        private const val WORK_TAG_REMOTE_ACTIVATION = "wireless_boot_start_remote_activation"
+
         fun getStartableAdbPort(): Int? = AdbWirelessHelper().getStartableAdbPort()
 
         private fun isRunning(context: Context, remoteActivation: Boolean? = null): Boolean = try {
@@ -340,7 +346,7 @@ class WirelessBootStartWorker(
                 .any { info ->
                     info.state == WorkInfo.State.RUNNING &&
                         (remoteActivation == null ||
-                            info.inputData.getBoolean(KEY_REMOTE_ACTIVATION, false) == remoteActivation)
+                            info.tags.contains(WORK_TAG_REMOTE_ACTIVATION) == remoteActivation)
                 }
         } catch (_: Exception) {
             false
@@ -376,6 +382,7 @@ class WirelessBootStartWorker(
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
 
             if (remoteActivation) {
+                requestBuilder.addTag(WORK_TAG_REMOTE_ACTIVATION)
                 // 息屏/Doze 下尽量立刻跑，配额用尽时 WorkManager 自动退回普通任务
                 requestBuilder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             }
