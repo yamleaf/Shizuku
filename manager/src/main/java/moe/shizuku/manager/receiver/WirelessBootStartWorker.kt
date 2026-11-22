@@ -16,9 +16,11 @@ import androidx.core.content.ContextCompat
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
+import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -67,6 +69,11 @@ class WirelessBootStartWorker(
             return Result.success()
         }
 
+        val remoteActivation = inputData.getBoolean(KEY_REMOTE_ACTIVATION, false)
+        if (remoteActivation) {
+            Log.i(AppConstants.TAG, "Wireless boot worker started in remote activation mode")
+        }
+
         val startablePort = adbWirelessHelper.getStartableAdbPort()
         val hasSecureSettingsPermission =
             applicationContext.checkSelfPermission(WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
@@ -80,10 +87,14 @@ class WirelessBootStartWorker(
         val keyguardManager =
             applicationContext.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
         if (keyguardManager.isDeviceLocked || keyguardManager.isKeyguardLocked) {
-            Log.i(AppConstants.TAG, "Wireless boot worker waiting for user unlock")
-            UserPresentRestartReceiver.setEnabled(applicationContext, true)
-            BootStartNotifications.showWaitingForUnlock(applicationContext)
-            return Result.success()
+            if (!remoteActivation) {
+                Log.i(AppConstants.TAG, "Wireless boot worker waiting for user unlock")
+                UserPresentRestartReceiver.setEnabled(applicationContext, true)
+                BootStartNotifications.showWaitingForUnlock(applicationContext)
+                return Result.success()
+            }
+            // 无人值守远程激活不能等用户解锁：WRITE_SECURE_SETTINGS 可用时直接尝试拉起无线调试。
+            Log.i(AppConstants.TAG, "Device is locked, but remote activation skips unlock gate")
         }
 
         UserPresentRestartReceiver.setEnabled(applicationContext, false)
@@ -105,7 +116,7 @@ class WirelessBootStartWorker(
                 AdbMdnsResult("127.0.0.1", startablePort)
             } else {
                 withContext(Dispatchers.IO) {
-                    runCatching { discoverWirelessAdbTarget() }.getOrNull()
+                    runCatching { discoverWirelessAdbTarget(remoteActivation) }.getOrNull()
                 }
             }
 
@@ -184,7 +195,7 @@ class WirelessBootStartWorker(
         }
     }
 
-    private suspend fun discoverWirelessAdbTarget(): AdbMdnsResult? {
+    private suspend fun discoverWirelessAdbTarget(remoteActivation: Boolean): AdbMdnsResult? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             return null
         }
@@ -214,7 +225,25 @@ class WirelessBootStartWorker(
                 }
             }
 
+            fun restartDiscoveryForRemote() {
+                Log.i(AppConstants.TAG, "Remote activation: adb_wifi_enabled turned off, re-enabling")
+                // 不主动 stop 再 start：AdbMdns.stop() 的 onDiscoveryStopped 是异步的，
+                // 立刻 start() 可能踩 registered 竞态而不再发 discoverServices。这里只重置超时并重试。
+                timeoutJob?.cancel()
+                runCatching { Settings.Global.putInt(cr, "adb_wifi_enabled", 1) }
+                runCatching {
+                    launch {
+                        delay(300L)
+                        startDiscoveryWithTimeout()
+                    }
+                }
+            }
+
             fun handleKeyguardOrAuth() {
+                if (remoteActivation) {
+                    restartDiscoveryForRemote()
+                    return
+                }
                 if ((km.isKeyguardLocked || km.isDeviceLocked) && unlockReceiver == null) {
                     val filter = IntentFilter(Intent.ACTION_USER_PRESENT)
                     val receiver = object : BroadcastReceiver() {
@@ -299,21 +328,30 @@ class WirelessBootStartWorker(
     companion object {
         private const val UNIQUE_WORK_NAME = "wireless_boot_start"
 
+        /** 与 DailyTask ShizukuManager 发送的 extra 字面值保持一致 */
+        const val KEY_REMOTE_ACTIVATION = "remote_activation"
+
         fun getStartableAdbPort(): Int? = AdbWirelessHelper().getStartableAdbPort()
 
-        private fun isRunning(context: Context): Boolean = try {
+        private fun isRunning(context: Context, remoteActivation: Boolean? = null): Boolean = try {
             WorkManager.getInstance(context)
                 .getWorkInfosForUniqueWork(UNIQUE_WORK_NAME)
                 .get(2, TimeUnit.SECONDS)
-                .any { it.state == WorkInfo.State.RUNNING }
+                .any { info ->
+                    info.state == WorkInfo.State.RUNNING &&
+                        (remoteActivation == null ||
+                            info.inputData.getBoolean(KEY_REMOTE_ACTIVATION, false) == remoteActivation)
+                }
         } catch (_: Exception) {
             false
         }
 
-        fun enqueue(context: Context) {
+        fun enqueue(context: Context, remoteActivation: Boolean = false) {
             // Boot, unlock and Wi-Fi triggers arrive together; REPLACE would cancel an in-flight
             // ADB start and restart it from scratch.
-            if (isRunning(context)) {
+            // 远程激活例外：如果当前跑的是「等解锁」的旧任务，允许 REPLACE 成不等解锁的远程任务。
+            val running = if (remoteActivation) isRunning(context, true) else isRunning(context)
+            if (running) {
                 Log.i(AppConstants.TAG, "Wireless boot start already running, skip enqueue")
                 return
             }
@@ -328,15 +366,24 @@ class WirelessBootStartWorker(
                 Constraints.NONE
             }
 
-            val request = OneTimeWorkRequestBuilder<WirelessBootStartWorker>()
+            val requestBuilder = OneTimeWorkRequestBuilder<WirelessBootStartWorker>()
+                .setInputData(
+                    Data.Builder()
+                        .putBoolean(KEY_REMOTE_ACTIVATION, remoteActivation)
+                        .build()
+                )
                 .setConstraints(constraints)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
-                .build()
+
+            if (remoteActivation) {
+                // 息屏/Doze 下尽量立刻跑，配额用尽时 WorkManager 自动退回普通任务
+                requestBuilder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            }
 
             WorkManager.getInstance(context).enqueueUniqueWork(
                 UNIQUE_WORK_NAME,
                 ExistingWorkPolicy.REPLACE,
-                request
+                requestBuilder.build()
             )
         }
 

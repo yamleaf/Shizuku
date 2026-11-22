@@ -18,9 +18,17 @@ import rikka.shizuku.Shizuku
 
 object ShizukuReceiverStarter {
 
-    fun start(context: Context, forceStart: Boolean = false) {
+    fun start(
+        context: Context,
+        forceStart: Boolean = false,
+        remoteActivation: Boolean = false
+    ) {
         if (UserHandleCompat.myUserId() > 0 || (Shizuku.pingBinder() && !forceStart)) {
             return
+        }
+
+        if (remoteActivation) {
+            Log.i(AppConstants.TAG, "Remote activation requested, skip unlock gate when possible")
         }
 
         val lastLaunchMethod = ShizukuSettings.getLastLaunchMode()
@@ -29,7 +37,11 @@ object ShizukuReceiverStarter {
         if (lastLaunchMethod == ShizukuSettings.LaunchMethod.ROOT && isRooted) {
             rootStart()
         } else {
-            startWireless(context, force = forceStart)
+            startWireless(
+                context,
+                force = forceStart,
+                remoteActivation = remoteActivation
+            )
         }
     }
 
@@ -60,7 +72,8 @@ object ShizukuReceiverStarter {
     fun startWireless(
         context: Context,
         force: Boolean = false,
-        requireBootSupport: Boolean = false
+        requireBootSupport: Boolean = false,
+        remoteActivation: Boolean = false
     ) {
         if (UserHandleCompat.myUserId() > 0 || (Shizuku.pingBinder() && !force)) {
             BootStartNotifications.dismiss(context)
@@ -86,7 +99,7 @@ object ShizukuReceiverStarter {
             return
         }
 
-        WirelessBootStartWorker.enqueue(context)
+        WirelessBootStartWorker.enqueue(context, remoteActivation = remoteActivation)
     }
 
     private fun rootStart() {
